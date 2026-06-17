@@ -73,16 +73,56 @@ interface AppState {
   deleteBill: (id: string) => void
 }
 
-const initialBookings = generateMockBookings()
-const initialBills = generateMockBills(initialBookings)
+const STORAGE_KEY = 'studio-schedule-manager-data-v1'
+
+interface PersistedState {
+  studios: Studio[]
+  engineers: Engineer[]
+  artists: Artist[]
+  rules: WeeklyRule[]
+  bookings: Booking[]
+  discounts: Discount[]
+  bills: Bill[]
+}
+
+function loadPersistedState(): PersistedState | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw) as PersistedState
+    if (Array.isArray(data.studios) && Array.isArray(data.bookings)) {
+      return data
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function savePersistedState(state: PersistedState): void {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // ignore quota errors
+  }
+}
+
+const persisted = loadPersistedState()
+
+const initialBookings = persisted ? persisted.bookings : generateMockBookings()
+const initialBills = persisted
+  ? persisted.bills
+  : generateMockBills(initialBookings)
 
 export const useAppStore = create<AppState>((set, get) => ({
-  studios: MOCK_STUDIOS,
-  engineers: MOCK_ENGINEERS,
-  artists: MOCK_ARTISTS,
-  rules: MOCK_RULES,
+  studios: persisted ? persisted.studios : MOCK_STUDIOS,
+  engineers: persisted ? persisted.engineers : MOCK_ENGINEERS,
+  artists: persisted ? persisted.artists : MOCK_ARTISTS,
+  rules: persisted ? persisted.rules : MOCK_RULES,
   bookings: initialBookings,
-  discounts: MOCK_DISCOUNTS,
+  discounts: persisted ? persisted.discounts : MOCK_DISCOUNTS,
   bills: initialBills,
 
   addStudio: (data) =>
@@ -218,15 +258,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     const originalAmount =
       Math.round(bookings.reduce((sum, b) => sum + b.subtotal, 0) * 100) / 100
 
-    let applicableDiscounts = state.discounts
+    let applicableDiscounts: Discount[] = []
     if (selectedDiscountIds && selectedDiscountIds.length > 0) {
+      applicableDiscounts = selectedDiscountIds
+        .map((id) => state.discounts.find((d) => d.id === id))
+        .filter((d): d is Discount => d !== undefined)
+    } else {
       applicableDiscounts = state.discounts
-        .filter((d) => selectedDiscountIds.includes(d.id))
-        .sort((a, b) => a.priority - b.priority)
     }
 
     const calcResult = calculateDiscounts(originalAmount, applicableDiscounts, {
-      date: dayjs().format('YYYY-MM-DD')
+      date: dayjs().format('YYYY-MM-DD'),
+      enforceOrder: selectedDiscountIds && selectedDiscountIds.length > 0
+        ? applicableDiscounts
+        : undefined
     })
 
     const items: BillItem[] = bookings.map((b) => {
@@ -282,3 +327,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       bills: s.bills.filter((b) => b.id !== id)
     }))
 }))
+
+useAppStore.subscribe((state) => {
+  savePersistedState({
+    studios: state.studios,
+    engineers: state.engineers,
+    artists: state.artists,
+    rules: state.rules,
+    bookings: state.bookings,
+    discounts: state.discounts,
+    bills: state.bills
+  })
+})

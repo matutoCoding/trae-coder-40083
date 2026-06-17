@@ -62,12 +62,18 @@ const WEEKDAY_OPTIONS = Object.entries(WEEKDAY_LABELS).map(([value, label]) => (
   label
 }))
 
+interface RuleFormSlot {
+  weekDay: WeekDay
+  startTime: Dayjs
+  endTime: Dayjs
+}
+
 interface RuleFormValues {
   name: string
   artistId: ID
   studioId: ID
   engineerId?: ID
-  slots: WeeklyTimeSlot[]
+  slots: RuleFormSlot[]
   effectiveRange: [Dayjs, Dayjs]
   hourlyRateOverride?: number
   note?: string
@@ -92,7 +98,7 @@ const CyclePage: React.FC<CyclePageProps> = ({ defaultTab = 'rules' }) => {
     bulkAddBookings
   } = useAppStore()
 
-  const [activeTab, setActiveTab] = useState<string>(defaultTab)
+  const [activeTab, setActiveTab] = useState<string>(defaultTab === 'generate' ? 'batch' : 'rules')
 
   const [ruleModalOpen, setRuleModalOpen] = useState(false)
   const [editingRule, setEditingRule] = useState<WeeklyRule | null>(null)
@@ -156,7 +162,13 @@ const CyclePage: React.FC<CyclePageProps> = ({ defaultTab = 'rules' }) => {
     ruleForm.resetFields()
     ruleForm.setFieldsValue({
       isActive: true,
-      slots: [{ weekDay: WeekDay.MONDAY, startTime: '09:00', endTime: '12:00' }]
+      slots: [
+        {
+          weekDay: WeekDay.MONDAY,
+          startTime: dayjs('09:00', 'HH:mm'),
+          endTime: dayjs('12:00', 'HH:mm')
+        }
+      ]
     })
     setRuleModalOpen(true)
   }
@@ -168,7 +180,11 @@ const CyclePage: React.FC<CyclePageProps> = ({ defaultTab = 'rules' }) => {
       artistId: record.artistId,
       studioId: record.studioId,
       engineerId: record.engineerId,
-      slots: record.slots,
+      slots: record.slots.map((s) => ({
+        weekDay: s.weekDay,
+        startTime: dayjs(s.startTime, 'HH:mm'),
+        endTime: dayjs(s.endTime, 'HH:mm')
+      })),
       effectiveRange: [dayjs(record.effectiveStart), dayjs(record.effectiveEnd)],
       hourlyRateOverride: record.hourlyRateOverride,
       note: record.note,
@@ -209,12 +225,18 @@ const CyclePage: React.FC<CyclePageProps> = ({ defaultTab = 'rules' }) => {
     try {
       const values = await ruleForm.validateFields()
 
+      const slots = values.slots.map((s: any) => ({
+        weekDay: s.weekDay as WeekDay,
+        startTime: (s.startTime as Dayjs).format('HH:mm'),
+        endTime: (s.endTime as Dayjs).format('HH:mm')
+      }))
+
       const ruleData = {
         name: values.name,
         artistId: values.artistId,
         studioId: values.studioId,
         engineerId: values.engineerId,
-        slots: values.slots,
+        slots,
         effectiveStart: values.effectiveRange[0].format('YYYY-MM-DD'),
         effectiveEnd: values.effectiveRange[1].format('YYYY-MM-DD'),
         hourlyRateOverride: values.hourlyRateOverride,
@@ -819,7 +841,7 @@ const CyclePage: React.FC<CyclePageProps> = ({ defaultTab = 'rules' }) => {
             name="slots"
             rules={[
               {
-                validator: async (_, slots: WeeklyTimeSlot[]) => {
+                validator: async (_, slots: RuleFormSlot[]) => {
                   if (!slots || slots.length === 0) {
                     return Promise.reject(new Error('请至少配置一个时段'))
                   }

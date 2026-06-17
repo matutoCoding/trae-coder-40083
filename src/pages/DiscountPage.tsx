@@ -270,10 +270,12 @@ const DiscountPage: React.FC<DiscountPageProps> = ({ defaultTab = 'manage' }) =>
       message.warning('请输入有效的原始金额')
       return
     }
-    const selectedDiscounts = sortedDiscounts.filter((d) => selectedDiscountIds.includes(d.id))
-    const result = calculateDiscounts(originalAmount, selectedDiscounts, {
+    const orderedDiscounts = selectedDiscountIds
+      .map((id) => discounts.find((d) => d.id === id))
+      .filter((d): d is Discount => d !== undefined)
+    const result = calculateDiscounts(originalAmount, orderedDiscounts, {
       date: calcDate.format('YYYY-MM-DD'),
-      enforceOrder: selectedDiscounts
+      enforceOrder: orderedDiscounts
     })
     setCalcResult(result)
   }

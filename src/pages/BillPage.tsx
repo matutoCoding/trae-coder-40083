@@ -295,7 +295,8 @@ const BillPage: React.FC<BillPageProps> = ({ defaultTab = 'list' }) => {
   const previewCalculation = useMemo(() => {
     if (originalAmount <= 0) return null
     return calculateDiscounts(originalAmount, orderedDiscounts, {
-      date: dayjs().format('YYYY-MM-DD')
+      date: dayjs().format('YYYY-MM-DD'),
+      enforceOrder: orderedDiscounts
     })
   }, [originalAmount, orderedDiscounts])
 
