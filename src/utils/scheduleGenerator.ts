@@ -11,6 +11,49 @@ import {
   ID
 } from '@/types'
 
+export interface ConflictInfo {
+  conflictType: 'studio' | 'engineer'
+  conflictBooking: Booking
+  message: string
+}
+
+export function checkBookingConflicts(
+  booking: Omit<Booking, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
+  allBookings: Booking[],
+  studios: Studio[],
+  artists: Artist[],
+  engineers: Engineer[]
+): ConflictInfo[] {
+  const conflicts: ConflictInfo[] = []
+  const studioName = studios.find((s) => s.id === booking.studioId)?.name ?? '未知棚'
+
+  for (const existing of allBookings) {
+    if (booking.id && existing.id === booking.id) continue
+    if (existing.status === BookingStatus.CANCELLED) continue
+
+    if (bookingOverlaps(existing, booking.date, booking.startTime, booking.endTime, booking.studioId)) {
+      const existingArtistName = artists.find((a) => a.id === existing.artistId)?.name ?? '未知艺人'
+      conflicts.push({
+        conflictType: 'studio',
+        conflictBooking: existing,
+        message: `录音棚 ${studioName} 与 ${existingArtistName} 的档期重叠（${existing.startTime}-${existing.endTime}）`
+      })
+    }
+
+    if (booking.engineerId && engineerOverlaps(existing, booking.date, booking.startTime, booking.endTime, booking.engineerId)) {
+      const existingArtistName = artists.find((a) => a.id === existing.artistId)?.name ?? '未知艺人'
+      const engineerName = engineers.find((e) => e.id === booking.engineerId)?.name ?? '未知录音师'
+      conflicts.push({
+        conflictType: 'engineer',
+        conflictBooking: existing,
+        message: `录音师 ${engineerName} 与 ${existingArtistName} 的档期重叠（${existing.startTime}-${existing.endTime}）`
+      })
+    }
+  }
+
+  return conflicts
+}
+
 export function generateId(): ID {
   return `id_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 }

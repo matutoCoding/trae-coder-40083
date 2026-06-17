@@ -25,7 +25,8 @@ import {
   Empty,
   Checkbox,
   Transfer,
-  Steps
+  Steps,
+  Collapse
 } from 'antd'
 import {
   DeleteOutlined,
@@ -88,6 +89,7 @@ const BillPage: React.FC<BillPageProps> = ({ defaultTab = 'list' }) => {
 
   const [activeTab, setActiveTab] = useState<string>(defaultTab === 'create' ? 'generate' : 'list')
 
+  const [reportMonth, setReportMonth] = useState<Dayjs>(dayjs())
   const [filterArtistId, setFilterArtistId] = useState<ID | undefined>(undefined)
   const [filterStatuses, setFilterStatuses] = useState<BillStatus[]>([
     BillStatus.UNPAID,
@@ -160,6 +162,79 @@ const BillPage: React.FC<BillPageProps> = ({ defaultTab = 'list' }) => {
       thisMonthCount
     }
   }, [bills])
+
+  const artistReportData = useMemo(() => {
+    const targetYear = reportMonth.year()
+    const targetMonth = reportMonth.month()
+    const monthBills = bills.filter((b) => {
+      const periodStart = dayjs(b.periodStart)
+      return periodStart.year() === targetYear && periodStart.month() === targetMonth
+    })
+
+    const artistMap = new Map<
+      ID,
+      {
+        artistId: ID
+        artistName: string
+        studioName: string
+        level: 'A' | 'B' | 'C' | 'D'
+        originalAmount: number
+        discountAmount: number
+        paidAmount: number
+        unpaidAmount: number
+        billCount: number
+      }
+    >()
+
+    monthBills.forEach((bill) => {
+      const artist = getArtist(bill.artistId)
+      if (!artist) return
+      if (!artistMap.has(artist.id)) {
+        artistMap.set(artist.id, {
+          artistId: artist.id,
+          artistName: artist.name,
+          studioName: artist.studioName,
+          level: artist.level,
+          originalAmount: 0,
+          discountAmount: 0,
+          paidAmount: 0,
+          unpaidAmount: 0,
+          billCount: 0
+        })
+      }
+      const data = artistMap.get(artist.id)!
+      data.originalAmount += bill.originalAmount
+      data.discountAmount += bill.discountAmount
+      if (bill.status === BillStatus.PAID) {
+        data.paidAmount += bill.finalAmount
+      }
+      if (bill.status === BillStatus.UNPAID) {
+        data.unpaidAmount += bill.finalAmount
+      }
+      data.billCount += 1
+    })
+
+    return Array.from(artistMap.values()).map((item) => ({
+      ...item,
+      originalAmount: Math.round(item.originalAmount * 100) / 100,
+      discountAmount: Math.round(item.discountAmount * 100) / 100,
+      paidAmount: Math.round(item.paidAmount * 100) / 100,
+      unpaidAmount: Math.round(item.unpaidAmount * 100) / 100
+    }))
+  }, [bills, reportMonth, artists])
+
+  const artistReportSummary = useMemo(() => {
+    return artistReportData.reduce(
+      (acc, item) => ({
+        originalAmount: acc.originalAmount + item.originalAmount,
+        discountAmount: acc.discountAmount + item.discountAmount,
+        paidAmount: acc.paidAmount + item.paidAmount,
+        unpaidAmount: acc.unpaidAmount + item.unpaidAmount,
+        billCount: acc.billCount + item.billCount
+      }),
+      { originalAmount: 0, discountAmount: 0, paidAmount: 0, unpaidAmount: 0, billCount: 0 }
+    )
+  }, [artistReportData])
 
   const handleSearch = () => {
     setAppliedFilters({
@@ -308,6 +383,44 @@ const BillPage: React.FC<BillPageProps> = ({ defaultTab = 'list' }) => {
       end: dates[dates.length - 1]
     }
   }, [selectedBookings])
+
+  const bookingsByStudio = useMemo(() => {
+    const groups: Record<string, typeof selectedBookings> = {}
+    selectedBookings.forEach((b) => {
+      if (!groups[b.studioId]) {
+        groups[b.studioId] = []
+      }
+      groups[b.studioId].push(b)
+    })
+    return groups
+  }, [selectedBookings])
+
+  const engineerSummary = useMemo(() => {
+    const map = new Map<ID, { name: string; hours: number; amount: number }>()
+    selectedBookings.forEach((b) => {
+      const engId = b.engineerId
+      if (engId) {
+        const eng = engineers.find((e) => e.id === engId)
+        const name = eng ? eng.name : '未指派'
+        const existing = map.get(engId)
+        if (existing) {
+          existing.hours += b.hours
+          existing.amount += b.subtotal
+        } else {
+          map.set(engId, { name, hours: b.hours, amount: b.subtotal })
+        }
+      } else {
+        const existing = map.get('__unassigned__')
+        if (existing) {
+          existing.hours += b.hours
+          existing.amount += b.subtotal
+        } else {
+          map.set('__unassigned__', { name: '未指派', hours: b.hours, amount: b.subtotal })
+        }
+      }
+    })
+    return Array.from(map.values())
+  }, [selectedBookings, engineers])
 
   const canGoStep2 = !!selectedArtistId
   const canGoStep3 = selectedBookingIds.length > 0
@@ -620,6 +733,76 @@ const BillPage: React.FC<BillPageProps> = ({ defaultTab = 'list' }) => {
     }
   ]
 
+  const LEVEL_TAG_COLORS: Record<'A' | 'B' | 'C' | 'D', string> = {
+    A: 'magenta',
+    B: 'red',
+    C: 'orange',
+    D: 'gold'
+  }
+
+  const artistReportColumns = [
+    {
+      title: '艺人名称',
+      dataIndex: 'artistName',
+      key: 'artistName'
+    },
+    {
+      title: '所属公司',
+      dataIndex: 'studioName',
+      key: 'studioName'
+    },
+    {
+      title: '客户等级',
+      dataIndex: 'level',
+      key: 'level',
+      width: 100,
+      render: (v: 'A' | 'B' | 'C' | 'D') => <Tag color={LEVEL_TAG_COLORS[v]}>{v}</Tag>
+    },
+    {
+      title: '原价合计',
+      dataIndex: 'originalAmount',
+      key: 'originalAmount',
+      width: 120,
+      align: 'right' as const,
+      render: (v: number) => `¥${v.toFixed(2)}`
+    },
+    {
+      title: '优惠合计',
+      dataIndex: 'discountAmount',
+      key: 'discountAmount',
+      width: 120,
+      align: 'right' as const,
+      render: (v: number) => (
+        <Text type={v > 0 ? 'danger' : undefined}>-¥{v.toFixed(2)}</Text>
+      )
+    },
+    {
+      title: '实收合计',
+      dataIndex: 'paidAmount',
+      key: 'paidAmount',
+      width: 120,
+      align: 'right' as const,
+      render: (v: number) => <Text strong>¥{v.toFixed(2)}</Text>
+    },
+    {
+      title: '未支付金额',
+      dataIndex: 'unpaidAmount',
+      key: 'unpaidAmount',
+      width: 120,
+      align: 'right' as const,
+      render: (v: number) => (
+        <Text type={v > 0 ? 'warning' : undefined}>¥{v.toFixed(2)}</Text>
+      )
+    },
+    {
+      title: '账单数',
+      dataIndex: 'billCount',
+      key: 'billCount',
+      width: 90,
+      align: 'center' as const
+    }
+  ]
+
   const renderBillListTab = () => (
     <>
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
@@ -668,6 +851,59 @@ const BillPage: React.FC<BillPageProps> = ({ defaultTab = 'list' }) => {
           </Card>
         </Col>
       </Row>
+
+      <Card title="📊 艺人月份对账汇总" style={{ marginBottom: 16 }}>
+        <Row gutter={[16, 16]} align="middle" style={{ marginBottom: 16 }}>
+          <Col xs={24} sm={8} md={6}>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>选择月份</div>
+            <DatePicker
+              picker="month"
+              style={{ width: '100%' }}
+              value={reportMonth}
+              onChange={(v) => v && setReportMonth(v)}
+            />
+          </Col>
+        </Row>
+        {artistReportData.length === 0 ? (
+          <Empty description="该月份暂无账单数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        ) : (
+          <Table
+            rowKey="artistId"
+            columns={artistReportColumns}
+            dataSource={artistReportData}
+            pagination={false}
+            size="small"
+            summary={() => (
+              <Table.Summary fixed>
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0} colSpan={3} align="right">
+                    <Text strong>合计：</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right">
+                    <Text>¥{artistReportSummary.originalAmount.toFixed(2)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="right">
+                    <Text type={artistReportSummary.discountAmount > 0 ? 'danger' : undefined}>
+                      -¥{artistReportSummary.discountAmount.toFixed(2)}
+                    </Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right">
+                    <Text strong>¥{artistReportSummary.paidAmount.toFixed(2)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} align="right">
+                    <Text type={artistReportSummary.unpaidAmount > 0 ? 'warning' : undefined}>
+                      ¥{artistReportSummary.unpaidAmount.toFixed(2)}
+                    </Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={7} align="center">
+                    <Text strong>{artistReportSummary.billCount}</Text>
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              </Table.Summary>
+            )}
+          />
+        )}
+      </Card>
 
       <Card>
         <Card size="small" style={{ marginBottom: 16 }}>
@@ -870,19 +1106,21 @@ const BillPage: React.FC<BillPageProps> = ({ defaultTab = 'list' }) => {
           />
         </Card>
 
-        {viewingBill.discountApplications.length > 0 && (
-          <>
-            <Divider orientation="left">优惠明细</Divider>
-            <Card size="small">
-              <Table
-                rowKey={(r) => r.discountId + r.discountName}
-                columns={discountAppColumns}
-                dataSource={viewingBill.discountApplications}
-                pagination={false}
-                size="small"
-              />
-            </Card>
-          </>
+        <Divider orientation="left">优惠明细</Divider>
+        {viewingBill.discountApplications.length === 0 ? (
+          <Card size="small">
+            <Alert type="info" showIcon message="本次账单未使用任何优惠，按原价出账" />
+          </Card>
+        ) : (
+          <Card size="small">
+            <Table
+              rowKey={(r) => r.discountId + r.discountName}
+              columns={discountAppColumns}
+              dataSource={viewingBill.discountApplications}
+              pagination={false}
+              size="small"
+            />
+          </Card>
         )}
 
         <div style={{ marginTop: 24, textAlign: 'right' }}>
@@ -1357,6 +1595,103 @@ const BillPage: React.FC<BillPageProps> = ({ defaultTab = 'list' }) => {
   const renderStep4 = () => {
     const artist = getArtist(selectedArtistId!)
     const finalPreview = previewCalculation
+
+    const step4BookingColumns = [
+      {
+        title: '日期',
+        dataIndex: 'date',
+        key: 'date',
+        width: 110
+      },
+      {
+        title: '录音师',
+        dataIndex: 'engineerId',
+        key: 'engineerId',
+        render: (id?: ID) => getEngineerName(id)
+      },
+      {
+        title: '开始',
+        dataIndex: 'startTime',
+        key: 'startTime',
+        width: 70
+      },
+      {
+        title: '结束',
+        dataIndex: 'endTime',
+        key: 'endTime',
+        width: 70
+      },
+      {
+        title: '时长',
+        dataIndex: 'hours',
+        key: 'hours',
+        width: 80,
+        render: (v: number) => `${v} 小时`
+      },
+      {
+        title: '单价(棚+师)',
+        key: 'unitPrice',
+        width: 110,
+        align: 'right' as const,
+        render: (_: unknown, r: typeof selectedBookings[number]) => {
+          const price = (r.studioRate || 0) + (r.engineerRate || 0)
+          return `¥${price.toFixed(2)}`
+        }
+      },
+      {
+        title: '金额',
+        dataIndex: 'subtotal',
+        key: 'subtotal',
+        width: 100,
+        align: 'right' as const,
+        render: (v: number) => <Text strong>¥{v.toFixed(2)}</Text>
+      }
+    ]
+
+    const collapseItems = Object.entries(bookingsByStudio).map(([studioId, studioBookings]) => {
+      const studio = studios.find((s) => s.id === studioId)
+      const studioName = studio ? studio.name : '未知棚'
+      const subtotalSum = studioBookings.reduce((sum, b) => sum + b.subtotal, 0)
+      return {
+        key: studioId,
+        label: (
+          <Space>
+            <Text strong>{studioName}</Text>
+            <Tag color="blue">{studioBookings.length} 条档期</Tag>
+          </Space>
+        ),
+        children: (
+          <div>
+            <Table
+              rowKey="id"
+              columns={step4BookingColumns}
+              dataSource={studioBookings}
+              pagination={false}
+              size="small"
+            />
+            <Row
+              justify="end"
+              style={{
+                marginTop: 8,
+                paddingTop: 8,
+                borderTop: '1px dashed #f0f0f0'
+              }}
+            >
+              <Col>
+                <Statistic
+                  title={`${studioName} 小计`}
+                  value={subtotalSum}
+                  precision={2}
+                  prefix="¥"
+                  valueStyle={{ color: '#1890ff' }}
+                />
+              </Col>
+            </Row>
+          </div>
+        )
+      }
+    })
+
     return (
       <Card title="Step 4 - 确认生成">
         <Card size="small" title="汇总信息" style={{ marginBottom: 16 }}>
@@ -1393,49 +1728,110 @@ const BillPage: React.FC<BillPageProps> = ({ defaultTab = 'list' }) => {
           </Descriptions>
         </Card>
 
-        {finalPreview && finalPreview.steps.length > 0 && (
-          <Card size="small" title="优惠步骤预览" style={{ marginBottom: 16 }}>
-            <Steps direction="vertical" size="small" current={finalPreview.steps.length}>
-              {finalPreview.steps.map((step: CalculationStep) => (
-                <Step
-                  key={step.order}
-                  title={
-                    <Space>
-                      <Text strong>{step.discountName}</Text>
-                      <Tag color={DISCOUNT_TYPE_COLORS[step.discountType]}>
-                        {DISCOUNT_TYPE_LABELS[step.discountType]}
-                      </Tag>
-                    </Space>
-                  }
-                  description={
-                    <div>
-                      <div>
-                        <Text type="secondary">
-                          ¥{step.beforeAmount.toFixed(2)} →{' '}
-                        </Text>
-                        {step.discountAmount > 0 ? (
-                          <Text type="danger">-¥{step.discountAmount.toFixed(2)}</Text>
-                        ) : (
-                          <Text type="secondary">无优惠</Text>
-                        )}
-                        <Text type="secondary"> → </Text>
-                        <Text strong>¥{step.afterAmount.toFixed(2)}</Text>
-                      </div>
-                      {step.note && (
+        <Card
+          size="small"
+          title={
+            <Space>
+              <FileTextOutlined />
+              <span>档期明细（按录音棚分组）</span>
+            </Space>
+          }
+          style={{ marginBottom: 16 }}
+        >
+          <Collapse items={collapseItems} defaultActiveKey={Object.keys(bookingsByStudio)} />
+        </Card>
+
+        <Card size="small" title="录音师汇总" style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 16]}>
+            {engineerSummary.map((eng, idx) => (
+              <Col xs={24} sm={12} md={8} key={idx}>
+                <Card size="small" bordered>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Text strong style={{ fontSize: 16 }}>
+                      {eng.name}
+                    </Text>
+                    <Row gutter={[16, 0]}>
+                      <Col>
+                        <Statistic
+                          title="服务时长"
+                          value={eng.hours}
+                          precision={2}
+                          suffix="小时"
+                          valueStyle={{ color: '#722ed1', fontSize: 16 }}
+                        />
+                      </Col>
+                      <Col>
+                        <Statistic
+                          title="累计金额"
+                          value={eng.amount}
+                          precision={2}
+                          prefix="¥"
+                          valueStyle={{ color: '#1890ff', fontSize: 16 }}
+                        />
+                      </Col>
+                    </Row>
+                  </Space>
+                </Card>
+              </Col>
+            ))}
+          </Row>
+        </Card>
+
+        <Card size="small" title="优惠明细" style={{ marginBottom: 16 }}>
+          {orderedDiscountIds.length === 0 ? (
+            <Alert type="info" showIcon message="本次未使用任何优惠，按原价出账" />
+          ) : (
+            <>
+              <Alert
+                type="info"
+                showIcon
+                message="以下优惠按此顺序依次计算，优惠顺序影响最终金额"
+                style={{ marginBottom: 16 }}
+              />
+              {finalPreview && finalPreview.steps.length > 0 && (
+                <Steps direction="vertical" size="small" current={finalPreview.steps.length}>
+                  {finalPreview.steps.map((step: CalculationStep) => (
+                    <Step
+                      key={step.order}
+                      title={
+                        <Space>
+                          <Text strong>{step.discountName}</Text>
+                          <Tag color={DISCOUNT_TYPE_COLORS[step.discountType]}>
+                            {DISCOUNT_TYPE_LABELS[step.discountType]}
+                          </Tag>
+                        </Space>
+                      }
+                      description={
                         <div>
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            ({step.note})
-                          </Text>
+                          <div>
+                            <Text type="secondary">
+                              ¥{step.beforeAmount.toFixed(2)} →{' '}
+                            </Text>
+                            {step.discountAmount > 0 ? (
+                              <Text type="danger">-¥{step.discountAmount.toFixed(2)}</Text>
+                            ) : (
+                              <Text type="secondary">无优惠</Text>
+                            )}
+                            <Text type="secondary"> → </Text>
+                            <Text strong>¥{step.afterAmount.toFixed(2)}</Text>
+                          </div>
+                          {step.note && (
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                ({step.note})
+                              </Text>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  }
-                  status={step.discountAmount > 0 ? 'finish' : 'process'}
-                />
-              ))}
-            </Steps>
-          </Card>
-        )}
+                      }
+                      status={step.discountAmount > 0 ? 'finish' : 'process'}
+                    />
+                  ))}
+                </Steps>
+              )}
+            </>
+          )}
+        </Card>
 
         <Alert
           type="warning"

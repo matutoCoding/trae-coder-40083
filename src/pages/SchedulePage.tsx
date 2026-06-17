@@ -23,7 +23,8 @@ import {
   Tooltip,
   Drawer,
   Switch,
-  Divider
+  Divider,
+  Alert
 } from 'antd'
 import {
   EditOutlined,
@@ -45,6 +46,7 @@ import {
   BOOKING_STATUS_COLORS,
   ID
 } from '@/types'
+import { checkBookingConflicts, ConflictInfo } from '@/utils/scheduleGenerator'
 
 const { RangePicker } = TimePicker
 const { TextArea } = Input
@@ -280,6 +282,40 @@ const SchedulePage: React.FC<SchedulePageProps> = ({ defaultTab = 'studios' }) =
         subtotal,
         status: values.status,
         note: values.note
+      }
+
+      const bookingForCheck = editingBooking
+        ? { ...bookingData, id: editingBooking.id }
+        : bookingData
+      const conflicts = checkBookingConflicts(
+        bookingForCheck,
+        bookings,
+        studios,
+        artists,
+        engineers
+      )
+
+      if (conflicts.length > 0) {
+        Modal.error({
+          title: '档期冲突',
+          width: 520,
+          content: (
+            <div>
+              <div style={{ marginBottom: 12 }}>检测到以下冲突，请调整后再提交：</div>
+              {conflicts.map((c: ConflictInfo, idx: number) => (
+                <Alert
+                  key={idx}
+                  type="error"
+                  showIcon
+                  style={{ marginBottom: 8 }}
+                  message={c.conflictType === 'studio' ? '录音棚冲突' : '录音师冲突'}
+                  description={c.message}
+                />
+              ))}
+            </div>
+          )
+        })
+        return
       }
 
       if (editingBooking) {

@@ -263,8 +263,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       applicableDiscounts = selectedDiscountIds
         .map((id) => state.discounts.find((d) => d.id === id))
         .filter((d): d is Discount => d !== undefined)
-    } else {
-      applicableDiscounts = state.discounts
     }
 
     const calcResult = calculateDiscounts(originalAmount, applicableDiscounts, {

@@ -24,7 +24,8 @@ import {
   Divider,
   List,
   Typography,
-  Empty
+  Empty,
+  Collapse
 } from 'antd'
 import {
   EditOutlined,
@@ -411,53 +412,6 @@ const CyclePage: React.FC<CyclePageProps> = ({ defaultTab = 'rules' }) => {
     return { total, generated, skipped }
   }, [previewResults])
 
-  const bookingDetailColumns = [
-    {
-      title: '日期',
-      dataIndex: 'date',
-      key: 'date',
-      width: 120,
-      render: (v: string) => (
-        <Space>
-          <CalendarOutlined style={{ color: '#1890ff' }} />
-          {v}
-        </Space>
-      )
-    },
-    {
-      title: '星期',
-      key: 'weekday',
-      width: 80,
-      render: (_: unknown, r: Booking) => WEEKDAY_LABELS[dayjs(r.date).day() as WeekDay]
-    },
-    {
-      title: '开始',
-      dataIndex: 'startTime',
-      key: 'startTime',
-      width: 90
-    },
-    {
-      title: '结束',
-      dataIndex: 'endTime',
-      key: 'endTime',
-      width: 90
-    },
-    {
-      title: '时长',
-      dataIndex: 'hours',
-      key: 'hours',
-      width: 100,
-      render: (v: number) => `${v} 小时`
-    },
-    {
-      title: '金额',
-      dataIndex: 'subtotal',
-      key: 'subtotal',
-      width: 120,
-      render: (v: number) => <Text strong style={{ color: '#cf1322' }}>¥{v}</Text>
-    }
-  ]
-
   const rulesTabContent = (
     <>
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
@@ -646,35 +600,130 @@ const CyclePage: React.FC<CyclePageProps> = ({ defaultTab = 'rules' }) => {
                       type="warning"
                       showIcon
                       style={{ marginBottom: 16 }}
-                      message={`存在 ${result.skippedBookings.length} 条跳过记录${result.skippedBookings.length > 10 ? '，仅显示前10条' : ''}`}
+                      message={`存在 ${result.skippedBookings.length} 条跳过记录`}
                       description={
-                        <List
-                          size="small"
-                          dataSource={result.skippedBookings.slice(0, 10)}
-                          renderItem={(item) => (
-                            <List.Item>
-                              <Space>
-                                <CalendarOutlined />
-                                <Text>{item.date}</Text>
-                                <ClockCircleOutlined />
-                                <Text>{item.startTime}</Text>
-                                <Tag color="orange">{item.reason}</Tag>
-                              </Space>
-                            </List.Item>
+                        <>
+                          <List
+                            size="small"
+                            dataSource={result.skippedBookings.slice(0, 10)}
+                            renderItem={(item) => (
+                              <List.Item>
+                                <Text>
+                                  [{item.date} {item.startTime}] {item.reason}
+                                </Text>
+                              </List.Item>
+                            )}
+                          />
+                          {result.skippedBookings.length > 10 && (
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              ... 还有 {result.skippedBookings.length - 10} 条冲突
+                            </Text>
                           )}
-                        />
+                        </>
                       }
                     />
                   )}
 
                   {result.generatedBookings.length > 0 ? (
-                    <Table
-                      rowKey="id"
-                      columns={bookingDetailColumns}
-                      dataSource={result.generatedBookings}
-                      pagination={{ pageSize: 5, size: 'small' }}
-                      size="small"
-                    />
+                    (() => {
+                      const groupedByDate = result.generatedBookings.reduce((acc, booking) => {
+                        if (!acc[booking.date]) {
+                          acc[booking.date] = []
+                        }
+                        acc[booking.date].push(booking)
+                        return acc
+                      }, {} as Record<string, Booking[]>)
+
+                      const sortedDates = Object.keys(groupedByDate).sort()
+                      const firstDate = sortedDates[0]
+
+                      return (
+                        <Collapse defaultActiveKey={firstDate}>
+                          {sortedDates.map((date) => {
+                            const dateBookings = groupedByDate[date]
+                            const dateTotal = dateBookings.reduce((s, b) => s + b.subtotal, 0)
+                            const weekday = WEEKDAY_LABELS[dayjs(date).day() as WeekDay]
+
+                            return (
+                              <Collapse.Panel
+                                key={date}
+                                header={
+                                  <Space>
+                                    <Text strong>{date}</Text>
+                                    <Text type="secondary">（{weekday}）</Text>
+                                    <Text type="secondary">·</Text>
+                                    <Text type="secondary">{dateBookings.length} 条档期</Text>
+                                    <Text type="secondary">·</Text>
+                                    <Text strong style={{ color: '#cf1322' }}>
+                                      合计 ¥{dateTotal.toFixed(2)}
+                                    </Text>
+                                  </Space>
+                                }
+                              >
+                                <Table
+                                  rowKey="id"
+                                  size="small"
+                                  pagination={false}
+                                  dataSource={dateBookings}
+                                  columns={[
+                                    {
+                                      title: '录音棚',
+                                      key: 'studio',
+                                      width: 140,
+                                      render: (_: unknown, r: Booking) => getStudioName(r.studioId)
+                                    },
+                                    {
+                                      title: '录音师',
+                                      key: 'engineer',
+                                      width: 120,
+                                      render: (_: unknown, r: Booking) => getEngineerName(r.engineerId)
+                                    },
+                                    {
+                                      title: '开始',
+                                      dataIndex: 'startTime',
+                                      key: 'startTime',
+                                      width: 90
+                                    },
+                                    {
+                                      title: '结束',
+                                      dataIndex: 'endTime',
+                                      key: 'endTime',
+                                      width: 90
+                                    },
+                                    {
+                                      title: '时长',
+                                      dataIndex: 'hours',
+                                      key: 'hours',
+                                      width: 100,
+                                      render: (v: number) => `${v} 小时`
+                                    },
+                                    {
+                                      title: '金额',
+                                      dataIndex: 'subtotal',
+                                      key: 'subtotal',
+                                      width: 120,
+                                      render: (v: number) => (
+                                        <Text strong style={{ color: '#cf1322' }}>
+                                          ¥{v.toFixed(2)}
+                                        </Text>
+                                      )
+                                    }
+                                  ]}
+                                />
+                                <div style={{ textAlign: 'right', marginTop: 8 }}>
+                                  <Text type="secondary">
+                                    小计：
+                                  </Text>
+                                  <Text strong style={{ color: '#cf1322', fontSize: 16 }}>
+                                    ¥{dateTotal.toFixed(2)}
+                                  </Text>
+                                </div>
+                              </Collapse.Panel>
+                            )
+                          })}
+                        </Collapse>
+                      )
+                    })()
                   ) : (
                     <Empty description="无可用档期可生成" />
                   )}
@@ -895,7 +944,7 @@ const CyclePage: React.FC<CyclePageProps> = ({ defaultTab = 'rules' }) => {
                   <Button
                     type="dashed"
                     onClick={() =>
-                      add({ weekDay: WeekDay.MONDAY, startTime: '09:00', endTime: '12:00' })
+                      add({ weekDay: WeekDay.MONDAY, startTime: dayjs('09:00', 'HH:mm'), endTime: dayjs('12:00', 'HH:mm') })
                     }
                     icon={<PlusOutlined />}
                     block
